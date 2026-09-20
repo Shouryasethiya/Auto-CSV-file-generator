@@ -2,7 +2,8 @@
 
 A Google Apps Script that turns a wide-format Google Sheets attendance grid (one column per class, per day) into a clean, long-format CSV ready for import into a database or LMS — for a single day at a time, filtered and mapped automatically.
 
-**No downloads, no manual copy-pasting, no re-running a Python script every day. It runs from a menu button inside the Google Sheet itself and always reads the live data.**
+**No downloads, no manual copy-pasting, no re-running a Python script every day. It runs from a menu button inside the Google Sheet itself and always reads the live data.
+**
 
 ## Output format
 
@@ -25,7 +26,7 @@ student_email,subject_id,attend_date,status,attend_time
 | Row | Content |
 |---|---|
 | 1 | Date, merged across all of that day's class columns (e.g. `31-Aug`) |
-| 2 | Class code (e.g. `U26AIMLXXX2`) |
+| 2 | Class code (e.g. `U26AIMLBXX2`) |
 | 3 | Class timing (e.g. `9:30-10:30`) |
 | 4 | Subject name (not used in the output, informational only) |
 | 5 | Blank |
@@ -45,35 +46,46 @@ student_email,subject_id,attend_date,status,attend_time
 
 | Class Code | subject_id |
 |---|---|
-| U26AIMLXXX2 | 101 |
-| U26AIMLPXX03 | 102 |
+| U26AIMLBXX2 | 101 |
+| U26AIMLPXXX3 | 102 |
 
 If your sheet's layout differs (different columns, different starting row, mapping columns in the other order), everything is adjustable in one place — see [Configuration](#configuration).
+
+## Multiple sections
+
+If your spreadsheet has several section tabs (e.g. `Section - A`, `Section - B`, `Section - C` — same layout, different students), you don't need to edit the script between them. The script always reads whichever tab is **open/active** when you click Generate CSV — just click the section tab first, then run it, switch tabs, run it again.
+
+Tabs listed in `NON_ATTENDANCE_SHEET_NAMES` (e.g. `Count`, `Summary`) and the mapping tab itself are blocked from being run by mistake, with a reminder to switch to a section tab.
+
+The downloaded file is named `attendance_<SectionName>_<date>.csv`, so exports from different sections never overwrite each other.
 
 ## Setup
 
 1. Open your Google Sheet.
 2. Go to **Extensions → Apps Script**.
 3. Delete any placeholder code in `Code.gs` and paste in the contents of [`attendance_csv_generator.gs`](./attendance_csv_generator.gs).
-4. Edit the `CONFIGURATION` block at the top of the script to match your actual tab names and column layout (see below).
+4. Edit the `CONFIGURATION` block at the top of the script — mainly `MAPPING_SHEET_NAME`, and `NON_ATTENDANCE_SHEET_NAMES` if you have non-section tabs (see below).
 5. Save, then close the Apps Script tab and reload your Google Sheet.
-6. A new **Attendance Tools** menu appears next to Help. Click **Attendance Tools → Generate CSV**.
-7. On first run, Google will show a one-time authorization prompt since it's a script tied to your own account — click through **Advanced → Go to project (unsafe) → Allow**. This is expected for any script you write yourself and only happens once.
+6. A new **Attendance Tools** menu appears next to Help.
+7. Click the section tab you want to export (e.g. "Section - A"), **then** click **Attendance Tools → Generate CSV**.
+8. On first run, Google will show a one-time authorization prompt since it's a script tied to your own account — click through **Advanced → Go to project (unsafe) → Allow**. This is expected for any script you write yourself and only happens once.
 
 ## Usage
 
-1. Click **Attendance Tools → Generate CSV**.
-2. Enter the date to export, in `YYYY-MM-DD` format (e.g. `2026-08-31`), even though the sheet header itself shows it as `31-Aug`.
-3. If any class code that day isn't in the mapping tab, you'll get a warning listing exactly which codes are missing, with the option to continue anyway or cancel and fix the mapping first.
-4. The CSV downloads straight to your computer as `attendance_YYYY-MM-DD.csv`, grouped by class (all students for one class, then the next class), rather than by student.
+1. Open the section tab you want to export (e.g. `Section - A`).
+2. Click **Attendance Tools → Generate CSV**.
+3. Enter the date to export, in `YYYY-MM-DD` format (e.g. `2026-08-31`), even though the sheet header itself shows it as `31-Aug`.
+4. If any class code that day isn't in the mapping tab, you'll get a warning listing exactly which codes are missing, with the option to continue anyway or cancel and fix the mapping first.
+5. The CSV downloads straight to your computer as `attendance_<SectionName>_YYYY-MM-DD.csv`, grouped by class (all students for one class, then the next class), rather than by student.
+6. Repeat for each section tab as needed.
 
 ## Configuration
 
 All adjustable values live in one block at the top of the script:
 
 ```javascript
-var ATTENDANCE_SHEET_NAME = 'Attendance';       // your attendance tab's exact name
 var MAPPING_SHEET_NAME    = 'Subject Mapping';  // your mapping tab's exact name
+var NON_ATTENDANCE_SHEET_NAMES = ['Count', 'Summary']; // tabs to never treat as a section
 
 var MAPPING_CLASS_CODE_COL = 1; // column in mapping tab holding the class code
 var MAPPING_SUBJECT_ID_COL = 2; // column in mapping tab holding the subject_id
