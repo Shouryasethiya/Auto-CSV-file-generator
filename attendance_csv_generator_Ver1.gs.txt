@@ -1,0 +1,221 @@
+/**
+ * ATTENDANCE CSV GENERATOR
+ * -------------------------------------------------------------
+ * Adds a menu button to your Google Sheet that reads the current
+ * attendance grid, cross-references the subject_id mapping tab,
+ * and downloads a CSV in the format:
+ *   student_email, subject_id, attend_date, status, attend_time
+ *
+ * SETUP:
+ * 1. Open your Google Sheet.
+ * 2. Extensions -> Apps Script.
+ * 3. Delete any starter code in Code.gs, paste this whole file in.
+ * 4. Edit the CONFIGURATION block below to match your sheet's
+ *    exact tab names and column layout.
+ * 5. Save (the disk icon). Close the Apps Script tab.
+ * 6. Reload your Google Sheet. A new menu "Attendance Tools" will
+ *    appear at the top. Click it -> "Generate CSV".
+ * 7. The FIRST time you run it, Google will ask you to authorize
+ *    the script (click through "Advanced" -> "Go to project (unsafe)"
+ *    -- this warning is normal for your own scripts). This is a
+ *    one-time step.
+ * -------------------------------------------------------------
+ */
+
+// ====================== CONFIGURATION ======================
+
+// Tab (sheet) names -- EDIT THESE to match your actual tab names
+var ATTENDANCE_SHEET_NAME = 'Attendance';       // the sheet in your screenshot
+var MAPPING_SHEET_NAME    = 'Subject Mapping';  // the separate subject_id tab
+
+// Mapping tab layout -- EDIT if your columns are in a different order
+// Assumes row 1 is a header row, data starts row 2.
+var MAPPING_CLASS_CODE_COL = 1; // column A: class code (e.g. U26AIMLB102)
+var MAPPING_SUBJECT_ID_COL = 2; // column B: subject_id
+
+// Attendance tab layout -- matches the screenshot you shared.
+// Only change these if your sheet's structure differs.
+var SNO_COL   = 1; // A
+var NAME_COL  = 2; // B
+var PHONE_COL = 3; // C
+var EMAIL_COL = 5; // E  <-- the email column you said to use
+
+var DATE_ROW       = 1; // row with the date (merged across a day's classes)
+var CLASS_CODE_ROW = 2; // row with class code
+var TIMING_ROW      = 3; // row with class timing (e.g. 9:30-10:30)
+var SUBJECT_ROW     = 4; // row with subject name (not used in output, FYI only)
+
+var FIRST_DATA_ROW  = 6; // first row of actual student data
+var FIRST_CLASS_COL = 6; // column F = first class/attendance column
+
+// =============================================================
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Attendance Tools')
+    .addItem('Generate CSV', 'generateAttendanceCSV')
+    .addToUi();
+}
+
+function generateAttendanceCSV() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(ATTENDANCE_SHEET_NAME);
+  var mappingSheet = ss.getSheetByName(MAPPING_SHEET_NAME);
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Could not find a tab named "' + ATTENDANCE_SHEET_NAME + '". Check ATTENDANCE_SHEET_NAME in the script.');
+    return;
+  }
+  if (!mappingSheet) {
+    SpreadsheetApp.getUi().alert('Could not find a tab named "' + MAPPING_SHEET_NAME + '". Check MAPPING_SHEET_NAME in the script.');
+    return;
+  }
+
+  // ---- Build class code -> subject_id lookup ----
+  var mapData = mappingSheet.getDataRange().getValues();
+  var codeToSubjectId = {};
+  for (var i = 1; i < mapData.length; i++) { // skip header row
+    var code = String(mapData[i][MAPPING_CLASS_CODE_COL - 1]).trim();
+    var subjectId = mapData[i][MAPPING_SUBJECT_ID_COL - 1];
+    if (code) codeToSubjectId[code] = subjectId;
+  }
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+
+  if (lastRow < FIRST_DATA_ROW) {
+    SpreadsheetApp.getUi().alert('No student data found below row ' + FIRST_DATA_ROW + '.');
+    return;
+  }
+
+  // ---- Ask which date to export ----
+  var ui = SpreadsheetApp.getUi();
+  var promptResponse = ui.prompt(
+    'Which date?',
+    'Enter the date to export, in YYYY-MM-DD format (e.g. 2026-08-31):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (promptResponse.getSelectedButton() !== ui.Button.OK) return; // cancelled
+
+  var targetDate = promptResponse.getResponseText().trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+    ui.alert('Please enter the date as YYYY-MM-DD, e.g. 2026-08-31.');
+    return;
+  }
+
+  var dateRow       = sheet.getRange(DATE_ROW, 1, 1, lastCol).getValues()[0];
+  var classCodeRow  = sheet.getRange(CLASS_CODE_ROW, 1, 1, lastCol).getValues()[0];
+  var timingRow     = sheet.getRange(TIMING_ROW, 1, 1, lastCol).getValues()[0];
+
+  // Merged date cells only carry a value in their top-left cell;
+  // forward-fill so every class column knows its date.
+  var filledDates = dateRow.slice();
+  for (var c = FIRST_CLASS_COL - 1; c < lastCol; c++) {
+    if ((filledDates[c] === '' || filledDates[c] === null) && c > 0) {
+      filledDates[c] = filledDates[c - 1];
+    }
+  }
+
+  var dataRange = sheet.getRange(FIRST_DATA_ROW, 1, lastRow - FIRST_DATA_ROW + 1, lastCol).getValues();
+
+  var output = [['student_email', 'subject_id', 'attend_date', 'status', 'attend_time']];
+  var skippedCodes = {}; // class codes with no subject_id mapping, for a heads-up at the end
+
+  // Outer loop = class columns (left to right, i.e. class-by-class),
+  // inner loop = students -- so the CSV is grouped by class first,
+  // then all students for that class, then the next class.
+  for (var c = FIRST_CLASS_COL - 1; c < lastCol; c++) {
+    var classCode = String(classCodeRow[c]).trim();
+    if (!classCode) continue; // not a class column
+
+    var attendDate = formatDate(filledDates[c]);
+    if (attendDate !== targetDate) continue; // not the date we're exporting
+
+    var subjectId = codeToSubjectId[classCode];
+    if (subjectId === undefined || subjectId === '') {
+      skippedCodes[classCode] = true;
+      continue; // no mapping found for this class code -- skip, don't guess
+    }
+
+    var attendTime = extractStartTime(String(timingRow[c]));
+
+    for (var r = 0; r < dataRange.length; r++) {
+      var row = dataRange[r];
+      var email = String(row[EMAIL_COL - 1]).trim();
+      if (!email || email.toUpperCase() === '#N/A') continue; // only students with a real email
+
+      var statusRaw = String(row[c]).trim().toLowerCase();
+      var status = '';
+      if (statusRaw.indexOf('present') !== -1) status = 'present';
+      else if (statusRaw.indexOf('absent') !== -1) status = 'absent';
+      else if (statusRaw.indexOf('late') !== -1) status = 'late';
+      else continue; // blank / unrecognized cell -- skip
+
+      output.push([email, subjectId, attendDate, status, attendTime]);
+    }
+  }
+
+  if (output.length === 1) {
+    ui.alert('No matching classes found for ' + targetDate + '. Double-check the date header on the sheet matches what you typed (e.g. "31-Aug" -> 2026-08-31).');
+    return;
+  }
+
+  var csvContent = output.map(function(row) {
+    return row.map(csvEscape).join(',');
+  }).join('\n');
+
+  var missing = Object.keys(skippedCodes);
+  if (missing.length > 0) {
+    var proceed = ui.alert(
+      'Heads up',
+      'These class codes on ' + targetDate + ' have no subject_id in "' + MAPPING_SHEET_NAME + '" and were skipped:\n' + missing.join(', ') + '\n\nContinue and download anyway?',
+      ui.ButtonSet.OK_CANCEL
+    );
+    if (proceed !== ui.Button.OK) return;
+  }
+
+  downloadCsv(csvContent, targetDate);
+}
+
+function formatDate(rawDate) {
+  if (Object.prototype.toString.call(rawDate) === '[object Date]') {
+    return Utilities.formatDate(rawDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  var s = String(rawDate).trim();
+  if (!s) return '';
+  // Handle strings like "31-Aug" by assuming the current year
+  var parsed = new Date(s + ' ' + new Date().getFullYear());
+  if (!isNaN(parsed.getTime())) {
+    return Utilities.formatDate(parsed, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return s; // fallback: leave as-is so you can spot it in the output
+}
+
+function extractStartTime(timing) {
+  // "9:30-10:30" -> "09:30"
+  var match = timing.match(/(\d{1,2}):(\d{2})/);
+  if (!match) return '';
+  var hh = ('0' + match[1]).slice(-2);
+  return hh + ':' + match[2];
+}
+
+function csvEscape(val) {
+  val = String(val);
+  if (val.indexOf(',') !== -1 || val.indexOf('"') !== -1 || val.indexOf('\n') !== -1) {
+    val = '"' + val.replace(/"/g, '""') + '"';
+  }
+  return val;
+}
+
+function downloadCsv(csvContent, targetDate) {
+  var fileName = 'attendance_' + targetDate + '.csv';
+  var base64 = Utilities.base64Encode(csvContent, Utilities.Charset.UTF_8);
+  var html = HtmlService.createHtmlOutput(
+    '<html><body style="font-family:sans-serif;padding:12px;">' +
+    '<p>Your download should start automatically.</p>' +
+    '<a id="dl" download="' + fileName + '" href="data:text/csv;charset=utf-8;base64,' + base64 + '">Click here if it does not</a>' +
+    '<script>document.getElementById("dl").click();</script>' +
+    '</body></html>'
+  ).setWidth(320).setHeight(90);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Downloading CSV...');
+}
