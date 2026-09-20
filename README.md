@@ -2,7 +2,7 @@
 
 A Google Apps Script that turns a wide-format Google Sheets attendance grid (one column per class, per day) into a clean, long-format CSV ready for import into a database or LMS — for a single day at a time, filtered and mapped automatically.
 
-No downloads, no manual copy-pasting, no re-running a Python script every day. It runs from a menu button inside the Google Sheet itself and always reads the live data.
+**No downloads, no manual copy-pasting, no re-running a Python script every day. It runs from a menu button inside the Google Sheet itself and always reads the live data.**
 
 ## Output format
 
@@ -12,7 +12,7 @@ student_email,subject_id,attend_date,status,attend_time
 
 | Column | Example | Notes |
 |---|---|---|
-| `student_email` | `aarushv371@gmail.com` | Only students with a real email are included |
+| `student_email` | `aarxxxx1@gmail.com` | Only students with a real email are included |
 | `subject_id` | `102` | Looked up from the mapping tab by class code |
 | `attend_date` | `2026-08-31` | Normalized to `YYYY-MM-DD` |
 | `status` | `present` | One of `present`, `absent`, `late` |
@@ -25,7 +25,7 @@ student_email,subject_id,attend_date,status,attend_time
 | Row | Content |
 |---|---|
 | 1 | Date, merged across all of that day's class columns (e.g. `31-Aug`) |
-| 2 | Class code (e.g. `U26AIMLB102`) |
+| 2 | Class code (e.g. `U26AIMLXXX2`) |
 | 3 | Class timing (e.g. `9:30-10:30`) |
 | 4 | Subject name (not used in the output, informational only) |
 | 5 | Blank |
@@ -45,8 +45,8 @@ student_email,subject_id,attend_date,status,attend_time
 
 | Class Code | subject_id |
 |---|---|
-| U26AIMLB102 | 101 |
-| U26AIMLPC103 | 102 |
+| U26AIMLXXX2 | 101 |
+| U26AIMLPXX03 | 102 |
 
 If your sheet's layout differs (different columns, different starting row, mapping columns in the other order), everything is adjustable in one place — see [Configuration](#configuration).
 
